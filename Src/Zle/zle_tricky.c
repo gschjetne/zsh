@@ -514,6 +514,30 @@ cmphaswilds(char *str)
     return 0;
 }
 
+/*
+ * Check if all the wildcards in str are in leading directory
+ * components, i.e. there is a `/' outside braces and parentheses
+ * after the last of them.
+ */
+
+/**/
+static int
+cmpwildsindirs(char *str)
+{
+    char *p, *slash = NULL;
+    int depth = 0;
+
+    for (p = str; *p; p++) {
+	if (*p == Inbrace || *p == Inpar)
+	    depth++;
+	else if ((*p == Outbrace || *p == Outpar) && depth)
+	    depth--;
+	else if (*p == '/' && !depth)
+	    slash = p;
+    }
+    return slash && !depth && !cmphaswilds(slash + 1);
+}
+
 /* Check if we have to complete a parameter name. */
 
 /**/
@@ -791,8 +815,10 @@ docomplete(int lst)
 		lst = *q ? COMP_EXPAND : COMP_COMPLETE;
 	    }
 	    /* And do expansion if there are wildcards and globcomplete is *
-	     * not used.                                                   */
-	    if (unset(GLOBCOMPLETE) && cmphaswilds(s))
+	     * not used.  With a completion function, wildcards only in   *
+	     * leading directories are left for it to complete through.  */
+	    if (unset(GLOBCOMPLETE) && cmphaswilds(s) &&
+		!(compfunc && cmpwildsindirs(s)))
 		lst = COMP_EXPAND;
 	}
 	if (lincmd && (inwhat == IN_NOTHING))

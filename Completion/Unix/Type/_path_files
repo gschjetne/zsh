@@ -258,7 +258,41 @@ fi
 
 # Now let's have a closer look at the string to complete.
 
-if [[ "$pre" = [^][*?#^\|\<\>\\]#(\`[^\`]#\`|\$)*/* && "$compstate[quote]" != \' ]]; then
+# PROTOTYPE: directory part has unquoted glob characters or a complete
+# brace expansion, and no parameter/command substitution.
+# linepath candidate: up to the first `/' after the last unquoted
+# pattern or brace character; the rest is completed as usual.
+tmp1=
+tmp2="${pre##(|*[^\\])[][*?\<\>\(\)\|\{\}]}"
+[[ "$tmp2" != "$pre" && "$tmp2" = */* ]] &&
+  tmp1="${pre[1,$#pre-$#tmp2]}${tmp2%%/*}/"
+if [[ -n "$tmp1" && -z "$_comp_correct" &&
+      "$compstate[quote]" != [\'\"] &&
+      "$tmp1" != *[\$\`]* &&
+      "${#tmp1//[^\{]}" -eq "${#tmp1//[^\}]}" &&
+      ( "$tmp1" = (|*[^\\])[*?\[\<\(\|]* ||
+        ( $_comp_caller_options[ignorebraces] != on &&
+          "$tmp1" = (|*[^\\])\{*,*\}* ) ) ]]; then
+  linepath="$tmp1"
+  # Absolute or ./ ../ patterns ignore -W.
+  [[ "$linepath" = (/|.|..)/* || "$linepath" = /* ]] && prepaths=( '' )
+  tmp2=( "${(@)prepaths}" )
+  prepaths=()
+  for tmp3 in "${(@)tmp2}"; do
+    tmp4=()
+    if [[ "$linepath" = /* ]]; then
+      eval "tmp4=( $linepath(N-/) )" 2>/dev/null
+    else
+      eval "tmp4=( ${(q)tmp3}$linepath(N-/) )" 2>/dev/null
+    fi
+    prepaths+=( "${(@)^tmp4%/}/" )
+  done
+  (( $#prepaths )) || return 1
+  realpath=
+  donepath=
+  pre="${pre[$#linepath+1,-1]}"
+  orig="${orig[$#linepath+1,-1]}"
+elif [[ "$pre" = [^][*?#^\|\<\>\\]#(\`[^\`]#\`|\$)*/* && "$compstate[quote]" != \' ]]; then
 
   # If there is a parameter expansion in the word from the line, we try
   # to complete the beast by expanding the prefix and completing anything

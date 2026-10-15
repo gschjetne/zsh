@@ -38,6 +38,14 @@ zstyle -T ":completion:${curcontext}:" suffix &&
      "${(e)word}" != (#s)(*[^\\]|)[][^*?\(\)\<\>\{\}\|]* ]] &&
   return 1
 
+# PROTOTYPE: patterns or braces only in leading directories are left
+# for _path_files to complete through, as for ~foo/ and $foo/ above.
+zstyle -T ":completion:${curcontext}:" suffix &&
+  [[ "$word" != *[\$\`]* &&
+     "${word##(|*[^\\])[][*?\<\>\(\)\|\{\}]}" != "$word" &&
+     "${word##(|*[^\\])[][*?\<\>\(\)\|\{\}]}" = */* ]] &&
+  return 1
+
 zstyle -s ":completion:${curcontext}:" accept-exact tmp ||
     [[ ! -o recexact ]] || tmp=1
 
