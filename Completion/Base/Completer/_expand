@@ -40,10 +40,15 @@ zstyle -T ":completion:${curcontext}:" suffix &&
 
 # PROTOTYPE: patterns or braces only in leading directories are left
 # for _path_files to complete through, as for ~foo/ and $foo/ above.
+if [[ $_comp_caller_options[extendedglob] = on ]]; then
+  tmp='[][*?<>()|{}^#]'
+else
+  tmp='[][*?<>()|{}]'
+fi
 zstyle -T ":completion:${curcontext}:" suffix &&
   [[ "$word" != *[\$\`]* &&
-     "${word##(|*[^\\])[][*?\<\>\(\)\|\{\}]}" != "$word" &&
-     "${word##(|*[^\\])[][*?\<\>\(\)\|\{\}]}" = */* ]] &&
+     "${word##(*[^\\]|)${~tmp}}" != "$word" &&
+     "${word##(*[^\\]|)${~tmp}}" = */* ]] &&
   return 1
 
 zstyle -s ":completion:${curcontext}:" accept-exact tmp ||

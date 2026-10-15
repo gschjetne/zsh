@@ -47,6 +47,8 @@ local pats haspats ignore pfx pfxsfx sopt gopt opt sdirs ignpar cfopt listsfx
 local nm=$compstate[nmatches] menu matcher mopts sort mid accex fake
 local listfiles listopts tmpdisp origtmp1 Uopt
 local accept_exact_dirs path_completion
+local -a globpats globdirs globfirst globrest globkeep
+local globfile globdir
 integer npathcheck
 local -a Mopts
 
@@ -258,34 +260,55 @@ fi
 
 # Now let's have a closer look at the string to complete.
 
-# PROTOTYPE: directory part has unquoted glob characters or a complete
-# brace expansion, and no parameter/command substitution.
-# linepath candidate: up to the first `/' after the last unquoted
-# pattern or brace character; the rest is completed as usual.
+# PROTOTYPE: if the leading directories contain patterns or brace
+# expansions, keep them on the line as typed and complete against the
+# directories they expand to, offering only what exists under all of
+# them.  The pattern prefix runs up to the first `/' after the last
+# unquoted pattern character; anything after it is completed as usual.
+# Parameter and command substitutions are left to the code below.
+
+if [[ $_comp_caller_options[extendedglob] = on ]]; then
+  tmp3='[][*?<>()|{}^#]' tmp4='[*?[<(|^#]'
+else
+  tmp3='[][*?<>()|{}]' tmp4='[*?[<(|]'
+fi
 tmp1=
-tmp2="${pre##(|*[^\\])[][*?\<\>\(\)\|\{\}]}"
+tmp2="${pre##(*[^\\]|)${~tmp3}}"
 [[ "$tmp2" != "$pre" && "$tmp2" = */* ]] &&
   tmp1="${pre[1,$#pre-$#tmp2]}${tmp2%%/*}/"
 if [[ -n "$tmp1" && -z "$_comp_correct" &&
       "$compstate[quote]" != [\'\"] &&
       "$tmp1" != *[\$\`]* &&
       "${#tmp1//[^\{]}" -eq "${#tmp1//[^\}]}" &&
-      ( "$tmp1" = (|*[^\\])[*?\[\<\(\|]* ||
+      ( "$tmp1" = (|*[^\\])${~tmp4}* ||
         ( $_comp_caller_options[ignorebraces] != on &&
-          "$tmp1" = (|*[^\\])\{*,*\}* ) ) ]]; then
+          "$tmp1" = (|*[^\\])\{*(,|..)*\}* ) ) ]]; then
   linepath="$tmp1"
-  # Absolute or ./ ../ patterns ignore -W.
-  [[ "$linepath" = (/|.|..)/* || "$linepath" = /* ]] && prepaths=( '' )
+  [[ "$linepath" = (|.|..)/* ]] && prepaths=( '' )
   tmp2=( "${(@)prepaths}" )
   prepaths=()
   for tmp3 in "${(@)tmp2}"; do
-    tmp4=()
-    if [[ "$linepath" = /* ]]; then
-      eval "tmp4=( $linepath(N-/) )" 2>/dev/null
-    else
-      eval "tmp4=( ${(q)tmp3}$linepath(N-/) )" 2>/dev/null
-    fi
-    prepaths+=( "${(@)^tmp4%/}/" )
+    # Brace expansion only; quoted pattern characters stay quoted so
+    # that the globbing below treats them literally.
+    globpats=()
+    () {
+      setopt localoptions noglob
+      eval "globpats=( ${linepath//(#b)\\([][*?<>()|#^~\\])/\\\\\\$match[1]} )"
+    } 2>/dev/null
+    # Every brace alternative has to match at least one directory.
+    globdirs=()
+    for tmp4 in "${(@)globpats}"; do
+      tmp1=( $tmp3${~tmp4}(N-/) )
+      (( $#tmp1 )) || continue 2
+      globdirs+=( "${(@)^tmp1%/}/" )
+    done
+    globdirs=( "${(@u)globdirs}" )
+    (( $#globdirs )) || continue
+    # Matches are generated under the first directory and checked
+    # against the others.
+    prepaths+=( "$globdirs[1]" )
+    globfirst+=( "$globdirs[1]" )
+    globrest+=( "${(pj:\0:)globdirs[2,-1]}" )
   done
   (( $#prepaths )) || return 1
   realpath=
@@ -504,6 +527,27 @@ for prepath in "$prepaths[@]"; do
       compfiles -p$cfopt tmp1 accex "$skipped" "$_matcher $matcher[2]" '' fake "$pats[@]"
     fi
     tmp1=( $~tmp1 ) 2> /dev/null
+
+    # With a pattern prefix, drop names that don't also exist under
+    # every other directory it expanded to.
+    if (( $#globfirst )); then
+      globdirs=( ${(ps:\0:)globrest[${globfirst[(ie)$prepath]}]} )
+      if (( $#globdirs )); then
+        globkeep=()
+        for globfile in "$tmp1[@]"; do
+          for globdir in "$globdirs[@]"; do
+            if [[ -d $globfile ]]; then
+              [[ -d $globdir${globfile#$prepath} ]] || continue 2
+            else
+              [[ -e $globdir${globfile#$prepath} ||
+                 -L $globdir${globfile#$prepath} ]] || continue 2
+            fi
+          done
+          globkeep+=( "$globfile" )
+        done
+        tmp1=( "$globkeep[@]" )
+      fi
+    fi
 
     if [[ -n "$PREFIX$SUFFIX" ]]; then
       # See which of them match what's on the line.
